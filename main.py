@@ -717,8 +717,10 @@ class AddDeviceDialog(QDialog):
             return None
 
 class EditDeviceDialog(QDialog):
-    def __init__(self, data, parent=None):
+    def __init__(self, data, serial_num_pc, parent=None):
         super().__init__(parent)
+
+        self.serial_num_pc = serial_num_pc
         self.setWindowTitle("Редактирование устройства")
         
         layout = QVBoxLayout()
@@ -776,7 +778,7 @@ class EditDeviceDialog(QDialog):
             cur.close()
             conn.close()
 
-            self.load_data()
+            #self.load_data()
         except psycopg2.Error as e:
             print("Error:", e)
             QMessageBox.critical(None, "Error", f"An error occurred: {e}")
