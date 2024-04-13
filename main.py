@@ -501,7 +501,7 @@ class DevicesDialog(QDialog):
     device_deleted = pyqtSignal()
     def __init__(self, parent, serial_num_pc):
         super().__init__(parent)
-        
+        self.devices = []
 
         self.serial_num_pc = serial_num_pc
         self.setWindowTitle("Устройства компьютера")
@@ -566,6 +566,7 @@ class DevicesDialog(QDialog):
                 WHERE c.serial_num_pc = %s
             """, (self.serial_num_pc,))
             result = cur.fetchall()
+            #self.devices = []
             self.devices_table.setRowCount(0)
             if result:
                 self.devices_table.setRowCount(len(result))
@@ -621,45 +622,77 @@ class DevicesDialog(QDialog):
     def delete_device(self):
         selected_row = self.devices_table.currentRow()
         if selected_row != -1:
-        # Получаем серийный номер устройства из первого столбца выбранной строки
-            serial_num_device = self.devices_table.item(selected_row, 0).text()
+            # Получаем серийный номер устройства из второго столбца выбранной строки
+            serial_num_device = self.devices_table.item(selected_row, 4).text()  # Изменил индекс столбца на 4
             print("Deleting device with serial number:", serial_num_device)
-    
-        # Удаляем устройство из базы данных
-            conn = None
-            cur = None
-            self.connection_info = self.read_connection_info()
-            try:
-                conn = psycopg2.connect(
-                    dbname=self.connection_info["dbname"],
-                    user=self.connection_info["user"],
-                    password=self.connection_info["password"],
-                    host=self.connection_info["host"],
-                    port=self.connection_info["port"]
-                )
-                cur = conn.cursor()
-        
-            # Выполняем SQL-запрос для удаления устройства по его серийному номеру
-                cur.execute("DELETE FROM Devices WHERE serial_num_pc = %s", (self.serial_num_pc,))
-                conn.commit()
-                # После успешного удаления отправляем сигнал
-                self.device_deleted.emit()
+            # Получаем идентификатор устройства
+            device_id = self.get_device_id(serial_num_device) 
+            print("Delete device with device_id:", device_id)
+            if device_id is not None:
+                # Удаляем устройство из базы данных
+                conn = None
+                cur = None
+                self.connection_info = self.read_connection_info()
+                try:
+                    conn = psycopg2.connect(
+                        dbname=self.connection_info["dbname"],
+                        user=self.connection_info["user"],
+                        password=self.connection_info["password"],
+                        host=self.connection_info["host"],
+                        port=self.connection_info["port"]
+                    )
+                    cur = conn.cursor()
+            
+                    # Выполняем SQL-запрос для удаления устройства по его идентификатору
+                    cur.execute("DELETE FROM Devices WHERE device_id = %s", (device_id,))
+                    conn.commit()
+                    # После успешного удаления отправляем сигнал
+                    self.device_deleted.emit()
 
-            # После успешного удаления обновляем отображение устройств
-                self.load_devices()
-                
-        
-                QMessageBox.information(self, "Успех", "Устройство успешно удалено.")
-            except Exception as e:
-                print("Error:", e)
-                QMessageBox.critical(None, "Error", f"An error occurred: {e}")
-            finally:
-                if cur:
-                    cur.close()
-                if conn:
-                    conn.close()
+                    # После успешного удаления обновляем отображение устройств
+                    self.load_devices()
+                    
+                    QMessageBox.information(self, "Успех", "Устройство успешно удалено.")
+                except Exception as e:
+                    print("Error:", e)
+                    QMessageBox.critical(None, "Error", f"An error occurred: {e}")
+                finally:
+                    if cur:
+                        cur.close()
+                    if conn:
+                        conn.close()
+            else:
+                QMessageBox.warning(self, "Ошибка", "Не удалось получить идентификатор устройства.")
         else:
             QMessageBox.warning(self, "Ошибка", "Пожалуйста, выберите устройство для удаления.")
+
+
+
+
+    def get_device_id(self, serial_num_device):
+        conn = None
+        cur = None
+        device_id = None
+        try:
+            self.connection_info = self.read_connection_info()
+            conn = psycopg2.connect(
+                dbname=self.connection_info["dbname"],
+                user=self.connection_info["user"],
+                password=self.connection_info["password"],
+                host=self.connection_info["host"],
+                port=self.connection_info["port"]
+            )
+            cur = conn.cursor()
+            cur.execute("SELECT device_id FROM Devices WHERE device_serial = %s", (serial_num_device,))
+            device_id = cur.fetchone()[0]  # Получаем первый элемент кортежа
+        except psycopg2.Error as e:
+            print("Error:", e)
+        finally:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+        return device_id
 
     def edit_device(self):
         selected_row = self.devices_table.currentRow()
@@ -761,7 +794,7 @@ class EditDeviceDialog(QDialog):
         device_name = self.device_name_edit.text()
         device_serial = self.device_serial_edit.text()
         # Получаем device_id из базы данных
-        device_id = self.get_device_id()
+        device_id = self.get_device_id()  # Используем метод get_device_id без аргументов
         # Здесь нужно выполнить SQL-запрос для обновления данных в базе данных
         if device_id is not None:
             self.connection_info = self.read_connection_info()
@@ -776,7 +809,7 @@ class EditDeviceDialog(QDialog):
 
                 cur = conn.cursor()
                 cur.execute("UPDATE Devices SET device_type = %s, device_model = %s, device_name = %s, device_serial = %s WHERE device_id = %s", (device_type, device_model, device_name, device_serial, device_id))
-                print(device_id)
+                print("в апдете получаю нужный ид:",device_id)
                 conn.commit()
                 cur.close()
                 conn.close()
@@ -785,11 +818,12 @@ class EditDeviceDialog(QDialog):
             except psycopg2.Error as e:
                 print("Error:", e)
                 QMessageBox.critical(None, "Error", f"An error occurred: {e}")
-        
+
             # Закрываем диалоговое окно после сохранения данных
             self.accept()
         else:
             QMessageBox.warning(None,"Warning", "Unable to retrieve device_id.")
+
     
     def get_device_id(self):
         device_serial = self.device_serial_edit.text()
