@@ -6,7 +6,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 import psycopg2
 from cryptography.fernet import Fernet
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, Qt
 
 # Версия программы
 VERSION = "1.2"
@@ -16,8 +16,9 @@ class ComputerApp(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("Учет компьютеров")
-        self.setGeometry(100, 100, 800, 400)
-        self.setWindowIcon(QIcon('icons.ico'))  
+        self.setGeometry(100, 100, 800, 500)
+        self.setWindowIcon(QIcon('icons.ico')) 
+        self.showMaximized()
         self.init_ui()
         self.load_data() #загружаем данные при запуске программы
     def read_connection_info(self):
@@ -138,8 +139,9 @@ class ComputerApp(QMainWindow):
                 co.storage AS "Дисковое пространство",
                 co.power_block AS "Блок питания" 
             FROM Computers c
-            LEFT JOIN Devices d ON c.serial_num_pc = d.serial_num_pc
-            LEFT JOIN Components co ON c.serial_num_pc = co.serial_num_pc;
+            JOIN Devices d ON c.serial_num_pc = d.serial_num_pc
+            JOIN Components co ON c.serial_num_pc = co.serial_num_pc
+            ORDER BY c.pc_id ASC;
             """)
             data = cur.fetchall()
             if data:
@@ -246,11 +248,6 @@ class ComputerApp(QMainWindow):
                 items.append(self.table.item(selected_row, i).text())
             dialog = EditRecordDialog(self,items)
             dialog.set_update_function(self.update_data)
-            # Создаем кнопку "Устройства" и подключаем к ней обработчик
-            #devices_button = QPushButton("Устройства")
-            #devices_button.clicked.connect(dialog.open_devices_dialog)
-            #dialog.layout.addWidget(devices_button)
-            
             dialog.exec_()
         else:
             QMessageBox.warning(self, "Ошибка", "Пожалуйста, выберите запись для редактирования.")
@@ -267,17 +264,13 @@ class ComputerApp(QMainWindow):
                 host=self.connection_info["host"],
                 port=self.connection_info["port"]
             )
-
             cur = conn.cursor()
-
             #cur.execute("UPDATE Devices SET device_type = %s, device_model = %s, device_name = %s, device_serial = %s WHERE serial_num_pc = %s", (device_type, device_model, device_name, device_serial, serial_num_pc))
             cur.execute("UPDATE Components SET cpu = %s, serial_num_cpu = %s, gpu = %s, serial_num_gpu = %s, storage = %s, power_block = %s WHERE serial_num_pc = %s", (cpu, serial_num_cpu, gpu, serial_num_gpu, storage, power_block, serial_num_pc))
             cur.execute("UPDATE Computers SET room_num = %s WHERE serial_num_pc = %s", (room_num, serial_num_pc))
-
             conn.commit()
             cur.close()
             conn.close()
-
             self.load_data()
         except psycopg2.Error as e:
             print("Error:", e)
@@ -307,6 +300,11 @@ class ComputerApp(QMainWindow):
         except psycopg2.Error as e:
             print("Error:", e)
             QMessageBox.critical(None, "Error", f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = ComputerApp()
+    sys.exit(app.exec_())
 
 class AddRecordDialog(QDialog):
     def __init__(self):
@@ -386,18 +384,6 @@ class EditRecordDialog(QDialog):
 
         self.room_num_label = QLabel("Номер комнаты:")
         self.room_num_input = QLineEdit(data[1])
-
-        #self.device_serial_label = QLabel("Серийный номер устройства:")
-        #self.device_serial_input = QLineEdit(data[5])
-
-        #self.device_type_label = QLabel("Тип устройства:")
-        #self.device_type_input = QLineEdit(data[2])
-
-        #self.device_model_label = QLabel("Модель устройства:")
-        #self.device_model_input = QLineEdit(data[3])
-
-        #self.device_name_label = QLabel("Наименование устройства:")
-        #self.device_name_input = QLineEdit(data[4])
 
         self.cpu_label = QLabel("Процессор:")
         self.cpu_input = QLineEdit(data[6])
@@ -562,7 +548,7 @@ class DevicesDialog(QDialog):
                         d.device_model AS "Модель устройства",
                         d.device_serial AS "Серийный номер устройства"
                 FROM Computers c
-                LEFT JOIN Devices d ON c.serial_num_pc = d.serial_num_pc
+                JOIN Devices d ON c.serial_num_pc = d.serial_num_pc
                 WHERE c.serial_num_pc = %s
             """, (self.serial_num_pc,))
             result = cur.fetchall()
