@@ -9,7 +9,7 @@ from cryptography.fernet import Fernet
 from PyQt5.QtCore import pyqtSignal, Qt
 
 # Версия программы
-VERSION = "1.2"
+VERSION = "1.3"
 
 class ComputerApp(QMainWindow):
     def __init__(self):
