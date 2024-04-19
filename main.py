@@ -9,302 +9,8 @@ from cryptography.fernet import Fernet
 from PyQt5.QtCore import pyqtSignal, Qt
 
 # Версия программы
-VERSION = "1.3"
+VERSION = "1.2"
 
-class ComputerApp(QMainWindow):
-    def __init__(self):
-        super().__init__()
-
-        self.setWindowTitle("Учет компьютеров")
-        self.setGeometry(100, 100, 800, 500)
-        self.setWindowIcon(QIcon('icons.ico')) 
-        self.showMaximized()
-        self.init_ui()
-        self.load_data() #загружаем данные при запуске программы
-    def read_connection_info(self):
-        with open("connection_info.txt", "rb") as f:
-            encrypted_data = f.read()
-        key = b'T7wknL4ZuLFpDlwqLR556kWdmwVWf0g5ZPL3HAB5iyk='  
-        f = Fernet(key)
-        decrypted_data = f.decrypt(encrypted_data)
-        self.connection_info = eval(decrypted_data.decode())  
-        return self.connection_info
-
-    def init_ui(self):
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-
-        self.layout = QVBoxLayout()
-        self.central_widget.setLayout(self.layout)
-
-        self.table = QTableWidget()
-        self.layout.addWidget(self.table)
-
-        self.table.setColumnCount(12)
-        
-        headers = [
-            "Серийный номер компьютера",
-            "Номер комнаты",
-            "Тип устройства",
-            "Модель устройства",
-            "Наименование устройства",
-            "Серийный номер устройства",
-            "Процессор",
-            "Серийный номер процессора",
-            "Видеокарта",
-            "Серийный номер видеокарты",
-            "Диск",
-            "Блок питания"
-        ]
-        self.table.setHorizontalHeaderLabels(headers)
-
-        for i in range(self.table.columnCount()):
-            header = self.table.horizontalHeaderItem(i)
-            header.setText(header.text() if len(header.text()) <= 15 else "\n".join(header.text().split()))
-
-        header_font = self.table.horizontalHeader().font()
-        header_font.setPointSize(12)  
-        self.table.horizontalHeader().setFont(header_font)  
-        
-        font = QFont()
-        font.setPointSize(10)  
-        self.table.setFont(font)  
-
-        self.load_data()
-
-        self.btn_add = QPushButton("Добавить запись")
-        self.btn_delete = QPushButton("Удалить запись")
-        self.btn_edit = QPushButton("Редактировать запись")
-
-        font = QFont()
-        font.setPointSize(14)  
-        self.btn_add.setFont(font)
-        self.btn_delete.setFont(font)
-        self.btn_edit.setFont(font)
-
-        self.btn_layout = QHBoxLayout()
-        self.btn_layout.addWidget(self.btn_add)
-        self.btn_layout.addWidget(self.btn_delete)
-        self.btn_layout.addWidget(self.btn_edit)
-
-        self.layout.addLayout(self.btn_layout)
-        self.btn_add.clicked.connect(self.show_add_record_dialog)
-        self.btn_delete.clicked.connect(self.delete_record)
-        self.btn_edit.clicked.connect(self.show_edit_record_dialog)
-
-        menubar = self.menuBar()
-        import_menu = menubar.addMenu('Экспорт')
-        version_menu = menubar.addMenu('Версия')
-        refresh_menu = menubar.addMenu('Обновить')
-
-        import_action = QAction('Экспорт', self)
-        import_action.triggered.connect(self.export_data)
-        import_menu.addAction(import_action)
-
-        version_action = QAction('Версия', self)
-        version_action.triggered.connect(self.show_version_info)
-        version_menu.addAction(version_action)
-
-        refresh_action = QAction('Обновить', self)
-        refresh_action.triggered.connect(self.load_data)
-        refresh_menu.addAction(refresh_action)
-
-
-    def load_data(self):
-        self.connection_info = self.read_connection_info()
-
-        try:
-            conn = psycopg2.connect(
-                dbname=self.connection_info["dbname"],
-                user=self.connection_info["user"],
-                password=self.connection_info["password"],
-                host=self.connection_info["host"],
-                port=self.connection_info["port"]
-            )
-
-            cur = conn.cursor()
-
-            cur.execute("""
-            SELECT
-                c.serial_num_pc AS "Серийный номер пк",
-                c.room_num AS "Номер комнаты",
-                d.device_type AS "Тип устройства",
-                d.device_model AS "Модель устройства",
-                d.device_name AS "Наименование устройства",
-                d.device_serial AS "Серийный номер устройства",
-                co.cpu AS "Процессор",
-                co.serial_num_cpu AS "Серийный номер процессора",
-                co.gpu AS "Видеокарта",
-                co.serial_num_gpu AS "Серийный номер видеокарты",
-                co.storage AS "Дисковое пространство",
-                co.power_block AS "Блок питания" 
-            FROM Computers c
-            JOIN Devices d ON c.serial_num_pc = d.serial_num_pc
-            JOIN Components co ON c.serial_num_pc = co.serial_num_pc
-            ORDER BY c.pc_id ASC;
-            """)
-            data = cur.fetchall()
-            if data:
-                self.table.setColumnCount(len(data[0]))
-                self.table.setRowCount(len(data))
-                for i, row in enumerate(data):
-                    for j, value in enumerate(row):
-                        item = QTableWidgetItem(str(value))
-                        self.table.setItem(i, j, item)
-
-            cur.close()
-            conn.close()
-        except psycopg2.Error as e:
-            print("Error:", e)
-            QMessageBox.critical(None, "Error", f"An error occurred: {e}")
-
-    def export_data(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, 'Сохранить как', '', 'Excel Files (*.xlsx);;All Files (*)')
-        if file_path:
-            wb = Workbook()
-            ws = wb.active
-
-            headers = [self.table.horizontalHeaderItem(col).text() for col in range(self.table.columnCount())]
-
-            for col, header in enumerate(headers, start=1):
-                ws.cell(row=1, column=col, value=header)
-                ws.column_dimensions[get_column_letter(col)].width = len(header) + 2
-                ws.cell(row=1, column=col).alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center', wrap_text=True)
-
-            for row in range(self.table.rowCount()):
-                row_data = []
-                for col in range(self.table.columnCount()):
-                    item = self.table.item(row, col)
-                    if item:
-                        row_data.append(item.text())
-                    else:
-                        row_data.append("")
-                ws.append(row_data)
-
-            wb.save(file_path)
-
-    def show_version_info(self):
-        QMessageBox.information(self, "Версия программы", f" Версия программы: {VERSION}")
-
-    def show_add_record_dialog(self):
-        dialog = AddRecordDialog()
-        if dialog.exec_():
-            connection_info = self.read_connection_info()
-            if connection_info:
-                data = dialog.get_data()
-                if data:
-                    self.add_computer(connection_info, *data)
-                self.load_data()
-            else:
-                QMessageBox.warning(self, "Ошибка", "Ошибка чтения информации о подключении.")
-
-    def delete_record(self):
-        selected_row = self.table.currentRow()
-        if selected_row >= 0:
-            items = []
-            for i in range(self.table.columnCount()):
-                items.append(self.table.item(selected_row, i).text())
-            self.delete_computer(self.connection_info, items[0])
-            self.table.setRowCount(0)
-            self.load_data()
-        else:
-            QMessageBox.warning(self, "Ошибка", "Пожалуйста, выберите запись для удаления.")
-
-    def delete_computer(self, connection_info, serial_num_pc):
-        try:
-            self.connection_info = self.read_connection_info()
-            conn = psycopg2.connect(
-                dbname=connection_info["dbname"],
-                user=connection_info["user"],
-                password=connection_info["password"],
-                host=connection_info["host"],
-                port=connection_info["port"]
-            )
-
-            cur = conn.cursor()
-
-            cur.execute("DELETE FROM Computers WHERE serial_num_pc = %s", (serial_num_pc,))
-            cur.execute("DELETE FROM Devices WHERE serial_num_pc = %s", (serial_num_pc,))
-            cur.execute("DELETE FROM Components WHERE serial_num_pc = %s", (serial_num_pc,))
-            cur.execute("DELETE FROM Rooms WHERE serial_num_pc = %s", (serial_num_pc,))
-            cur.execute("DELETE FROM Components_Computers WHERE serial_num_pc = %s", (serial_num_pc,))
-
-            conn.commit()
-            cur.close()
-            conn.close()
-
-        except psycopg2.Error as e:
-            conn.rollback()
-            print("Error:", e)
-            QMessageBox.critical(None, "Error", f"An error occurred: {e}")
-
-
-
-    def show_edit_record_dialog(self):
-        selected_row = self.table.currentRow()
-        if selected_row != -1:
-            items = []
-            for i in range(self.table.columnCount()):
-                items.append(self.table.item(selected_row, i).text())
-            dialog = EditRecordDialog(self,items)
-            dialog.set_update_function(self.update_data)
-            dialog.exec_()
-        else:
-            QMessageBox.warning(self, "Ошибка", "Пожалуйста, выберите запись для редактирования.")
-
-    def update_data(self, data):
-        serial_num_pc, room_num, cpu, serial_num_cpu, gpu, serial_num_gpu, storage, power_block = data #device_type, device_model, device_name, device_serial, cpu
-        print("Updating data:", data)  # Отладочное сообщение
-        self.connection_info = self.read_connection_info()
-        try:
-            conn = psycopg2.connect(
-                dbname=self.connection_info["dbname"],
-                user=self.connection_info["user"],
-                password=self.connection_info["password"],
-                host=self.connection_info["host"],
-                port=self.connection_info["port"]
-            )
-            cur = conn.cursor()
-            #cur.execute("UPDATE Devices SET device_type = %s, device_model = %s, device_name = %s, device_serial = %s WHERE serial_num_pc = %s", (device_type, device_model, device_name, device_serial, serial_num_pc))
-            cur.execute("UPDATE Components SET cpu = %s, serial_num_cpu = %s, gpu = %s, serial_num_gpu = %s, storage = %s, power_block = %s WHERE serial_num_pc = %s", (cpu, serial_num_cpu, gpu, serial_num_gpu, storage, power_block, serial_num_pc))
-            cur.execute("UPDATE Computers SET room_num = %s WHERE serial_num_pc = %s", (room_num, serial_num_pc))
-            conn.commit()
-            cur.close()
-            conn.close()
-            self.load_data()
-        except psycopg2.Error as e:
-            print("Error:", e)
-            QMessageBox.critical(None, "Error", f"An error occurred: {e}")
-
-    def add_computer(self, connection_info, serial_num_pc, room_num, device_type, device_model, device_name, device_serial, cpu, serial_num_cpu, gpu, serial_num_gpu, storage, power_block):
-        try:
-            conn = psycopg2.connect(
-                dbname=connection_info["dbname"],
-                user=connection_info["user"],
-                password=connection_info["password"],
-                host=connection_info["host"],
-                port=connection_info["port"]
-            )
-
-            cur = conn.cursor()
-
-            cur.execute("INSERT INTO Computers (serial_num_pc, room_num) VALUES (%s, %s)", (serial_num_pc, room_num))
-            cur.execute("INSERT INTO Rooms (room_num, serial_num_pc, pc_id) VALUES (%s, %s, (SELECT pc_id FROM Computers WHERE serial_num_pc = %s))", (room_num, serial_num_pc, serial_num_pc))
-            cur.execute("INSERT INTO Devices (device_type, device_serial, device_model, device_name, serial_num_pc) VALUES (%s, %s, %s, %s, %s)", (device_type, device_serial, device_model, device_name, serial_num_pc))
-            cur.execute("INSERT INTO Components (cpu, gpu, storage, power_block, serial_num_pc, serial_num_cpu, serial_num_gpu) VALUES (%s, %s, %s, %s, %s, %s, %s)", (cpu, gpu, storage, power_block, serial_num_pc, serial_num_cpu, serial_num_gpu))
-            cur.execute("INSERT INTO Components_Computers (component_id, serial_num_pc) VALUES ((SELECT component_id FROM Components WHERE serial_num_pc = %s), %s)", (serial_num_pc, serial_num_pc))
-
-            conn.commit()
-            cur.close()
-            conn.close()
-        except psycopg2.Error as e:
-            print("Error:", e)
-            QMessageBox.critical(None, "Error", f"An error occurred: {e}")
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = ComputerApp()
-    sys.exit(app.exec_())
 
 class AddRecordDialog(QDialog):
     def __init__(self):
@@ -482,6 +188,9 @@ class EditRecordDialog(QDialog):
         power_block = self.power_block_input.text()
         return serial_num_pc, room_num, cpu, serial_num_cpu, gpu, serial_num_gpu, storage, power_block #device_type, device_model, device_name, device_serial, cpu
 
+
+
+# КЛАССЫ ДЛЯ УСТРОЙСТВ
 #Класс Для отображения Формы Устройства. Удаление и добавление записей формы Устройства (devices)
 class DevicesDialog(QDialog):
     device_deleted = pyqtSignal()
@@ -840,6 +549,305 @@ class EditDeviceDialog(QDialog):
             print("Error:", e)
             QMessageBox.critical(None, "Error", f"An error occurred while retrieving device_id: {e}")
             return None  # В случае ошибки вернем None
+        
+#класс основного окна приложения
+class ComputerApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("Учет компьютеров")
+        self.setGeometry(100, 100, 800, 500)
+        self.setWindowIcon(QIcon('icons.ico')) 
+        self.showMaximized()
+        self.init_ui()
+        self.load_data() #загружаем данные при запуске программы
+    def read_connection_info(self):
+        with open("connection_info.txt", "rb") as f:
+            encrypted_data = f.read()
+        key = b'T7wknL4ZuLFpDlwqLR556kWdmwVWf0g5ZPL3HAB5iyk='  
+        f = Fernet(key)
+        decrypted_data = f.decrypt(encrypted_data)
+        self.connection_info = eval(decrypted_data.decode())  
+        return self.connection_info
+
+    def init_ui(self):
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+
+        self.layout = QVBoxLayout()
+        self.central_widget.setLayout(self.layout)
+
+        self.table = QTableWidget()
+        self.layout.addWidget(self.table)
+
+        self.table.setColumnCount(12)
+        
+        headers = [
+            "Серийный номер компьютера",
+            "Номер комнаты",
+            "Тип устройства",
+            "Модель устройства",
+            "Наименование устройства",
+            "Серийный номер устройства",
+            "Процессор",
+            "Серийный номер процессора",
+            "Видеокарта",
+            "Серийный номер видеокарты",
+            "Диск",
+            "Блок питания"
+        ]
+        self.table.setHorizontalHeaderLabels(headers)
+
+        for i in range(self.table.columnCount()):
+            header = self.table.horizontalHeaderItem(i)
+            header.setText(header.text() if len(header.text()) <= 15 else "\n".join(header.text().split()))
+
+        header_font = self.table.horizontalHeader().font()
+        header_font.setPointSize(12)  
+        self.table.horizontalHeader().setFont(header_font)  
+        
+        font = QFont()
+        font.setPointSize(10)  
+        self.table.setFont(font)  
+
+        self.load_data()
+
+        self.btn_add = QPushButton("Добавить запись")
+        self.btn_delete = QPushButton("Удалить запись")
+        self.btn_edit = QPushButton("Редактировать запись")
+
+        font = QFont()
+        font.setPointSize(14)  
+        self.btn_add.setFont(font)
+        self.btn_delete.setFont(font)
+        self.btn_edit.setFont(font)
+
+        self.btn_layout = QHBoxLayout()
+        self.btn_layout.addWidget(self.btn_add)
+        self.btn_layout.addWidget(self.btn_delete)
+        self.btn_layout.addWidget(self.btn_edit)
+
+        self.layout.addLayout(self.btn_layout)
+        self.btn_add.clicked.connect(self.show_add_record_dialog)
+        self.btn_delete.clicked.connect(self.delete_record)
+        self.btn_edit.clicked.connect(self.show_edit_record_dialog)
+
+        menubar = self.menuBar()
+        import_menu = menubar.addMenu('Экспорт')
+        version_menu = menubar.addMenu('Версия')
+        refresh_menu = menubar.addMenu('Обновить')
+
+        import_action = QAction('Экспорт', self)
+        import_action.triggered.connect(self.export_data)
+        import_menu.addAction(import_action)
+
+        version_action = QAction('Версия', self)
+        version_action.triggered.connect(self.show_version_info)
+        version_menu.addAction(version_action)
+
+        refresh_action = QAction('Обновить', self)
+        refresh_action.triggered.connect(self.load_data)
+        refresh_menu.addAction(refresh_action)
+
+
+    def load_data(self):
+        self.connection_info = self.read_connection_info()
+
+        try:
+            conn = psycopg2.connect(
+                dbname=self.connection_info["dbname"],
+                user=self.connection_info["user"],
+                password=self.connection_info["password"],
+                host=self.connection_info["host"],
+                port=self.connection_info["port"]
+            )
+
+            cur = conn.cursor()
+
+            cur.execute("""
+            SELECT
+                c.serial_num_pc AS "Серийный номер пк",
+                c.room_num AS "Номер комнаты",
+                d.device_type AS "Тип устройства",
+                d.device_model AS "Модель устройства",
+                d.device_name AS "Наименование устройства",
+                d.device_serial AS "Серийный номер устройства",
+                co.cpu AS "Процессор",
+                co.serial_num_cpu AS "Серийный номер процессора",
+                co.gpu AS "Видеокарта",
+                co.serial_num_gpu AS "Серийный номер видеокарты",
+                co.storage AS "Дисковое пространство",
+                co.power_block AS "Блок питания" 
+            FROM Computers c
+            JOIN Devices d ON c.serial_num_pc = d.serial_num_pc
+            JOIN Components co ON c.serial_num_pc = co.serial_num_pc
+            ORDER BY c.pc_id ASC;
+            """)
+            data = cur.fetchall()
+            if data:
+                self.table.setColumnCount(len(data[0]))
+                self.table.setRowCount(len(data))
+                for i, row in enumerate(data):
+                    for j, value in enumerate(row):
+                        item = QTableWidgetItem(str(value))
+                        self.table.setItem(i, j, item)
+
+            cur.close()
+            conn.close()
+        except psycopg2.Error as e:
+            print("Error:", e)
+            QMessageBox.critical(None, "Error", f"An error occurred: {e}")
+
+    def export_data(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, 'Сохранить как', '', 'Excel Files (*.xlsx);;All Files (*)')
+        if file_path:
+            wb = Workbook()
+            ws = wb.active
+
+            headers = [self.table.horizontalHeaderItem(col).text() for col in range(self.table.columnCount())]
+
+            for col, header in enumerate(headers, start=1):
+                ws.cell(row=1, column=col, value=header)
+                ws.column_dimensions[get_column_letter(col)].width = len(header) + 2
+                ws.cell(row=1, column=col).alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+            for row in range(self.table.rowCount()):
+                row_data = []
+                for col in range(self.table.columnCount()):
+                    item = self.table.item(row, col)
+                    if item:
+                        row_data.append(item.text())
+                    else:
+                        row_data.append("")
+                ws.append(row_data)
+
+            wb.save(file_path)
+
+    def show_version_info(self):
+        QMessageBox.information(self, "Версия программы", f" Версия программы: {VERSION}")
+
+    def show_add_record_dialog(self):
+        dialog = AddRecordDialog()
+        if dialog.exec_():
+            connection_info = self.read_connection_info()
+            if connection_info:
+                data = dialog.get_data()
+                if data:
+                    self.add_computer(connection_info, *data)
+                self.load_data()
+            else:
+                QMessageBox.warning(self, "Ошибка", "Ошибка чтения информации о подключении.")
+
+    def delete_record(self):
+        selected_row = self.table.currentRow()
+        if selected_row >= 0:
+            items = []
+            for i in range(self.table.columnCount()):
+                items.append(self.table.item(selected_row, i).text())
+            self.delete_computer(self.connection_info, items[0])
+            self.table.setRowCount(0)
+            self.load_data()
+        else:
+            QMessageBox.warning(self, "Ошибка", "Пожалуйста, выберите запись для удаления.")
+
+    def delete_computer(self, connection_info, serial_num_pc):
+        try:
+            self.connection_info = self.read_connection_info()
+            conn = psycopg2.connect(
+                dbname=connection_info["dbname"],
+                user=connection_info["user"],
+                password=connection_info["password"],
+                host=connection_info["host"],
+                port=connection_info["port"]
+            )
+
+            cur = conn.cursor()
+
+            cur.execute("DELETE FROM Computers WHERE serial_num_pc = %s", (serial_num_pc,))
+            cur.execute("DELETE FROM Devices WHERE serial_num_pc = %s", (serial_num_pc,))
+            cur.execute("DELETE FROM Components WHERE serial_num_pc = %s", (serial_num_pc,))
+            cur.execute("DELETE FROM Rooms WHERE serial_num_pc = %s", (serial_num_pc,))
+            cur.execute("DELETE FROM Components_Computers WHERE serial_num_pc = %s", (serial_num_pc,))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        except psycopg2.Error as e:
+            conn.rollback()
+            print("Error:", e)
+            QMessageBox.critical(None, "Error", f"An error occurred: {e}")
+
+
+
+    def show_edit_record_dialog(self):
+        selected_row = self.table.currentRow()
+        if selected_row != -1:
+            items = []
+            for i in range(self.table.columnCount()):
+                items.append(self.table.item(selected_row, i).text())
+            dialog = EditRecordDialog(self,items)
+            dialog.set_update_function(self.update_data)
+            dialog.exec_()
+        else:
+            QMessageBox.warning(self, "Ошибка", "Пожалуйста, выберите запись для редактирования.")
+
+    def update_data(self, data):
+        serial_num_pc, room_num, cpu, serial_num_cpu, gpu, serial_num_gpu, storage, power_block = data #device_type, device_model, device_name, device_serial, cpu
+        print("Updating data:", data)  # Отладочное сообщение
+        self.connection_info = self.read_connection_info()
+        try:
+            conn = psycopg2.connect(
+                dbname=self.connection_info["dbname"],
+                user=self.connection_info["user"],
+                password=self.connection_info["password"],
+                host=self.connection_info["host"],
+                port=self.connection_info["port"]
+            )
+            cur = conn.cursor()
+            #cur.execute("UPDATE Devices SET device_type = %s, device_model = %s, device_name = %s, device_serial = %s WHERE serial_num_pc = %s", (device_type, device_model, device_name, device_serial, serial_num_pc))
+            cur.execute("UPDATE Components SET cpu = %s, serial_num_cpu = %s, gpu = %s, serial_num_gpu = %s, storage = %s, power_block = %s WHERE serial_num_pc = %s", (cpu, serial_num_cpu, gpu, serial_num_gpu, storage, power_block, serial_num_pc))
+            cur.execute("UPDATE Computers SET room_num = %s WHERE serial_num_pc = %s", (room_num, serial_num_pc))
+            conn.commit()
+            cur.close()
+            conn.close()
+            self.load_data()
+        except psycopg2.Error as e:
+            print("Error:", e)
+            QMessageBox.critical(None, "Error", f"An error occurred: {e}")
+
+    def add_computer(self, connection_info, serial_num_pc, room_num, device_type, device_model, device_name, device_serial, cpu, serial_num_cpu, gpu, serial_num_gpu, storage, power_block):
+        try:
+            conn = psycopg2.connect(
+                dbname=connection_info["dbname"],
+                user=connection_info["user"],
+                password=connection_info["password"],
+                host=connection_info["host"],
+                port=connection_info["port"]
+            )
+
+            cur = conn.cursor()
+
+            cur.execute("INSERT INTO Computers (serial_num_pc, room_num) VALUES (%s, %s)", (serial_num_pc, room_num))
+            cur.execute("INSERT INTO Rooms (room_num, serial_num_pc, pc_id) VALUES (%s, %s, (SELECT pc_id FROM Computers WHERE serial_num_pc = %s))", (room_num, serial_num_pc, serial_num_pc))
+            cur.execute("INSERT INTO Devices (device_type, device_serial, device_model, device_name, serial_num_pc) VALUES (%s, %s, %s, %s, %s)", (device_type, device_serial, device_model, device_name, serial_num_pc))
+            cur.execute("INSERT INTO Components (cpu, gpu, storage, power_block, serial_num_pc, serial_num_cpu, serial_num_gpu) VALUES (%s, %s, %s, %s, %s, %s, %s)", (cpu, gpu, storage, power_block, serial_num_pc, serial_num_cpu, serial_num_gpu))
+            cur.execute("INSERT INTO Components_Computers (component_id, serial_num_pc) VALUES ((SELECT component_id FROM Components WHERE serial_num_pc = %s), %s)", (serial_num_pc, serial_num_pc))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+        except psycopg2.Error as e:
+            print("Error:", e)
+            QMessageBox.critical(None, "Error", f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = ComputerApp()
+    sys.exit(app.exec_())
+
+
+
 
         
 
